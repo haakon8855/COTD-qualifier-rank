@@ -3,3 +3,6 @@ name        = "COTD Qualification Rank"
 author      = "HaakonTM"
 category    = "Race"
 version     = "1.0.0"
+
+[script]
+dependencies = [ "NadeoServices" ]
