@@ -1,7 +1,15 @@
 bool showMainWindow = true;
+bool initialised = false;
 
+// current map info
 uint currentRank = 0;
 uint totalPlayers = 0;
+uint personalBest = 0;
+uint competitionId = 0;
+uint challengeId = 0;
+array<Json::Value> records;
+
+uint requestsSent = 0;
 
 void Main()
 {
@@ -12,54 +20,141 @@ void Main()
     }
     print("Done");
 
-    if (MapIsLoaded())
+    while (true)
     {
-        uint competitionId = 8887;
-
-        // Get qualifierId from the cup
-        string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
-        auto competitionDetails = SendGetRequest(competitionEndpoint);
-        uint challengeId = competitionDetails[0]["qualifierChallengeId"];
-
-        // Get five spaced initial values (rank 1, rank <total> and three spaced equally between these)
-        // E.g. 0, 200, 400, 600, 800 if there are 800 records
-        uint length = 1;
-
-        // First record
-        Json::Value record = GetChallengeLeaderboard(challengeId, length, 0);
-        // Store total amount of players
-        totalPlayers = record["cardinal"];
-        // Store first record
-        array<Json::Value> records(totalPlayers);
-        records[record["results"][0]["rank"]-1] = record["results"][0];
-
-        // Last record
-        record = GetChallengeLeaderboard(challengeId, length, totalPlayers-1);
-        records[record["results"][0]["rank"]-1] = record["results"][0];
-
-        // Middle record
-        uint middleIndex = totalPlayers / 2;
-        record = GetChallengeLeaderboard(challengeId, length, middleIndex);
-        records[record["results"][0]["rank"]-1] = record["results"][0];
-
-        // Lower middle record
-        uint lowerMiddleIndex = middleIndex / 2;
-        record = GetChallengeLeaderboard(challengeId, length, lowerMiddleIndex);
-        records[record["results"][0]["rank"]-1] = record["results"][0];
-
-        // Upper middle record
-        uint upperMiddleIndex = middleIndex + lowerMiddleIndex;
-        record = GetChallengeLeaderboard(challengeId, length, upperMiddleIndex);
-        records[record["results"][0]["rank"]-1] = record["results"][0];
-
-        for (uint i = 0; i < records.Length; i++)
+        if (MapIsLoaded())
         {
-            if (Json::Write(records[i]) != "null")
+            if (!initialised)
             {
-                print(FormatRecord(records[i]));
+                currentRank = 0;
+                requestsSent = 0;
+                personalBest = 0;
+
+                // TODO: Get actual correct competitionId from the map
+                // Also need to check if current map is an actual TOTD
+                competitionId = 8916;
+
+                // Get qualifierId from the cup
+                string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
+                auto competitionDetails = SendGetRequest(competitionEndpoint);
+                challengeId = competitionDetails[0]["qualifierChallengeId"];
+
+                // First record
+                Json::Value record = GetChallengeLeaderboard(1, 0);
+                // Store total amount of players
+                totalPlayers = record["cardinal"];
+                // Store first record
+                array<Json::Value> recordList(totalPlayers);
+                records = recordList;
+                records[record["results"][0]["rank"]-1] = record["results"][0];
+
+                // Middle record
+                uint middleIndex = (totalPlayers - 1) / 2;
+                record = GetChallengeLeaderboard(1, middleIndex);
+                records[record["results"][0]["rank"]-1] = record["results"][0];
+
+                initialised = true;
             }
+
+            uint currentPB = GetCurrentMapPB();
+            if (currentPB != personalBest)
+            {
+                personalBest = currentPB;
+                currentRank = FindApproxPBRank(0, totalPlayers-1);
+
+                for (uint i = 0; i < records.Length; i++)
+                {
+                    if (Json::Write(records[i]) != "null")
+                    {
+                        print(FormatRecord(records[i]));
+                    }
+                }
+
+                print("Total requests: " + requestsSent);
+            }
+            else
+            {
+                yield();
+            }
+        } 
+        else
+        {
+            yield();
         }
     }
+}
+
+uint FindApproxPBRank(uint left, uint right)
+{
+    while (left <= right)
+    {
+        // if there are 100 or less records between L and R
+        if (left + 100 >= right)
+        {
+            // Get the remaining records in one request and do sequential search
+            return FindExactPBRank(left, right);
+        }
+
+        // Calclulate middle index between L and R
+        uint middle = (left + right) / 2;
+        // if middle index has not been fetched already
+        if (Json::Write(records[middle]) == "null")
+        {
+            // Fetch record at middle index and store it for future searches
+            Json::Value middleRecord = GetChallengeLeaderboard(1, middle);
+            records[middleRecord["results"][0]["rank"]-1] = middleRecord["results"][0];
+
+            // TODO: Remove this, this is just a debug measure to ensure indices are correct
+            if (middleRecord["results"][0]["rank"]-1 != middle)
+            {
+                print("ERROR!");
+                return 0;
+            }
+        }
+        // if PB is worse than score at middle index
+        if (records[middle]["score"] < personalBest)
+        {
+            left = middle + 1;
+        }
+        // if PB is better than score at middle index
+        else if (records[middle]["score"] > personalBest)
+        {
+            right = middle - 1;
+        }
+        // if PB is the same as score at middle index
+        else
+        {
+            return middle + 1;
+        }
+    }
+    return 0;
+}
+
+uint FindExactPBRank(uint left, uint right)
+{
+    if (left < right or left + 100 > right)
+    {
+        Json::Value recordRange = GetChallengeLeaderboard(right - left, left)["results"];
+        for (uint i = 0; i < recordRange.Length; i++)
+        {
+            records[recordRange[i]["rank"]-1] = recordRange[i];
+        }
+        for (uint i = 0; i < recordRange.Length; i++)
+        {
+            if (recordRange[i]["score"] == personalBest)
+            {
+                return recordRange[i]["rank"];
+            }
+            else if (recordRange[i]["score"] < personalBest
+                and recordRange[i+1]["score"] >= personalBest)
+            {
+                return recordRange[i+1]["rank"];
+            }
+        }
+        // If no match return rank of last record in list
+        return recordRange[recordRange.Length-1]["rank"];
+    }
+    return 0;
 }
 
 string FormatRecord(Json::Value record)
@@ -67,7 +162,7 @@ string FormatRecord(Json::Value record)
     return "Rank: " + Json::Write(record["rank"]) + "\t Time: " + Json::Write(record["score"]);
 }
 
-Json::Value GetChallengeLeaderboard(uint challengeId, uint length, uint offset)
+Json::Value GetChallengeLeaderboard(uint length, uint offset)
 {
     string challengeURL = NadeoServices::BaseURLClub() + "/api/challenges/" + challengeId + "/leaderboard?length=" + length + "&offset=" + offset;
     return SendGetRequest(challengeURL);
@@ -146,7 +241,8 @@ Json::Value SendGetRequest(const string &in endpoint)
 
     // Throttle request rate
     sleep(500);
-    print("Sent request");
+    requestsSent++;
+    print("Total requests: " + requestsSent);
 
     request.Start();
     while (!request.Finished())
