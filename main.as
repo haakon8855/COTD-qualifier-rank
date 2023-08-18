@@ -35,7 +35,10 @@ void Main()
             {
                 if (!initialised)
                 {
-                    Initialise();
+                    if (!Initialise())
+                    {
+                        continue;
+                    }
                 }
 
                 uint currentPB = GetCurrentMapPB();
@@ -68,23 +71,23 @@ void Main()
         } 
         else
         {
-            initialised = false;
-            running = false;
+            Reset();
             yield();
         }
     }
 }
 
-void Initialise()
+bool Initialise()
 {
-    currentRank = 0;
-    requestsSent = 0;
-    personalBest = 0;
-
     // TODO: Get actual correct competitionId from the map
     // Also need to check if current map is an actual TOTD
-    competitionId = 8946;
+    // competitionId = 8946;
     competitionId = Text::ParseInt(competitionIdInput);
+    if (competitionId == 0)
+    {
+        Reset();
+        return false;
+    }
 
     // Get qualifierId from the cup
     string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
@@ -107,6 +110,25 @@ void Initialise()
     records[record["results"][0]["rank"]-1] = record["results"][0];
 
     initialised = true;
+    
+    return true;
+}
+
+void Reset()
+{
+    initialised = false;
+    running = false;
+
+    currentRank = 0;
+    requestsSent = 0;
+    personalBest = 0;
+
+    totalPlayers = 0;
+    competitionId = 0;
+    challengeId = 0;
+
+    array<Json::Value> empty(1);
+    records = empty;
 }
 
 uint FindApproxPBRank(uint left, uint right)
@@ -214,8 +236,8 @@ void RenderInterface()
 void RenderMainWindow()
 {
     auto mapInfo = GetApp().RootMap.MapInfo;
-    UI::SetNextWindowSize(180, 210);
-    if (UI::Begin("COTD Qualifier Rank", showMainWindow, UI::WindowFlags::NoCollapse))
+    UI::SetNextWindowSize(180, 205);
+    if (UI::Begin("COTD Qualifier Rank", showMainWindow, UI::WindowFlags::NoCollapse | UI::WindowFlags::NoTitleBar))
     {
         UI::BeginGroup();
             UI::BeginTable("header", 1, UI::TableFlags::SizingFixedFit);
@@ -231,16 +253,25 @@ void RenderMainWindow()
                 UI::TableNextColumn();
                 UI::Text("Current rank:");
                 UI::TableNextColumn();
-                UI::Text(
+                UI::Text("\\$aaa" + 
                     (currentRank == 0 ? "--- " : currentRank + " ") + 
                     "/" + 
                     (totalPlayers == 0 ? " --- " : " " + totalPlayers)
                     );
+
                 UI::TableNextRow();
                 UI::TableNextColumn();
                 UI::Text("Current PB:");
                 UI::TableNextColumn();
-                UI::Text((personalBest == 0 ? "---" : Time::Format((personalBest), true, false, false)));
+                UI::Text("\\$aaa" + 
+                    (personalBest == 0 ? "---" : Time::Format((personalBest), true, false, false))
+                    );
+
+                UI::TableNextRow();
+                UI::TableNextColumn();
+                UI::Text("CompID:");
+                UI::TableNextColumn();
+                UI::Text("\\$aaa" + (competitionId == 0 ? "---" : competitionId + ""));
 
                 UI::TableNextRow();
                 UI::Dummy(20);
@@ -254,9 +285,13 @@ void RenderMainWindow()
 
                 UI::TableNextRow();
                 UI::TableNextColumn();
-                if (UI::Button("Start"))
+                if (UI::Button(running ? "Stop" : "Start"))
                 {
-                    running = true;
+                    if (!running and initialised and competitionId != Text::ParseInt(competitionIdInput))
+                    {
+                        Reset();
+                    }
+                    running = !running;
                 }
 
             UI::EndTable();
