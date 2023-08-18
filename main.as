@@ -7,6 +7,7 @@ bool debug = true;
 bool showMainWindow = true;
 bool initialised = false;
 bool running = false;
+uint requestsSent = 0;
 
 // current map info
 uint currentRank = 0;
@@ -16,8 +17,6 @@ string competitionIdInput = "";
 uint competitionId = 0;
 uint challengeId = 0;
 array<Json::Value> records;
-
-uint requestsSent = 0;
 
 void Main()
 {
@@ -40,29 +39,7 @@ void Main()
                         continue;
                     }
                 }
-
-                uint currentPB = GetCurrentMapPB();
-                if (currentPB != personalBest)
-                {
-                    personalBest = currentPB;
-                    currentRank = FindApproxPBRank(0, totalPlayers-1);
-
-                    if (debug)
-                    {
-                        for (uint i = 0; i < records.Length; i++)
-                        {
-                            if (Json::Write(records[i]) != "null")
-                            {
-                                print(FormatRecord(records[i]));
-                            }
-                        }
-                        print("Total requests: " + requestsSent);
-                    }
-                }
-                else
-                {
-                    yield();
-                }
+                FindPBRank();
             }
             else
             {
@@ -131,7 +108,33 @@ void Reset()
     records = empty;
 }
 
-uint FindApproxPBRank(uint left, uint right)
+void FindPBRank()
+{
+    uint currentPB = GetCurrentMapPB();
+    if (currentPB != personalBest)
+    {
+        personalBest = currentPB;
+        currentRank = FindPBRankBinarySearch(0, totalPlayers-1);
+
+        if (debug)
+        {
+            for (uint i = 0; i < records.Length; i++)
+            {
+                if (Json::Write(records[i]) != "null")
+                {
+                    print(FormatRecord(records[i]));
+                }
+            }
+            print("Total requests: " + requestsSent);
+        }
+    }
+    else
+    {
+        yield();
+    }
+}
+
+uint FindPBRankBinarySearch(uint left, uint right)
 {
     while (left <= right)
     {
@@ -139,7 +142,7 @@ uint FindApproxPBRank(uint left, uint right)
         if (left + 100 >= right)
         {
             // Get the remaining records in one request and do sequential search
-            return FindExactPBRank(left, right);
+            return FindPBRankSequentialSearch(left, right);
         }
 
         // Calclulate middle index between L and R
@@ -177,7 +180,7 @@ uint FindApproxPBRank(uint left, uint right)
     return 0;
 }
 
-uint FindExactPBRank(uint left, uint right)
+uint FindPBRankSequentialSearch(uint left, uint right)
 {
     if (left < right or left + 100 > right)
     {
