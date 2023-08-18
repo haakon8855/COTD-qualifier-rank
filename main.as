@@ -18,59 +18,65 @@ void Main()
     {
         yield();
     }
-    print("Done");
 
     while (true)
     {
         if (MapIsLoaded())
         {
-            if (!initialised)
+            if (showMainWindow)
             {
-                currentRank = 0;
-                requestsSent = 0;
-                personalBest = 0;
-
-                // TODO: Get actual correct competitionId from the map
-                // Also need to check if current map is an actual TOTD
-                competitionId = 8916;
-
-                // Get qualifierId from the cup
-                string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
-                auto competitionDetails = SendGetRequest(competitionEndpoint);
-                challengeId = competitionDetails[0]["qualifierChallengeId"];
-
-                // First record
-                Json::Value record = GetChallengeLeaderboard(1, 0);
-                // Store total amount of players
-                totalPlayers = record["cardinal"];
-                // Store first record
-                array<Json::Value> recordList(totalPlayers);
-                records = recordList;
-                records[record["results"][0]["rank"]-1] = record["results"][0];
-
-                // Middle record
-                uint middleIndex = (totalPlayers - 1) / 2;
-                record = GetChallengeLeaderboard(1, middleIndex);
-                records[record["results"][0]["rank"]-1] = record["results"][0];
-
-                initialised = true;
-            }
-
-            uint currentPB = GetCurrentMapPB();
-            if (currentPB != personalBest)
-            {
-                personalBest = currentPB;
-                currentRank = FindApproxPBRank(0, totalPlayers-1);
-
-                for (uint i = 0; i < records.Length; i++)
+                if (!initialised)
                 {
-                    if (Json::Write(records[i]) != "null")
-                    {
-                        print(FormatRecord(records[i]));
-                    }
+                    currentRank = 0;
+                    requestsSent = 0;
+                    personalBest = 0;
+
+                    // TODO: Get actual correct competitionId from the map
+                    // Also need to check if current map is an actual TOTD
+                    competitionId = 8946;
+
+                    // Get qualifierId from the cup
+                    string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
+                    auto competitionDetails = SendGetRequest(competitionEndpoint);
+                    challengeId = competitionDetails[0]["qualifierChallengeId"];
+                    print("ChallengeId: " + challengeId);
+
+                    // First record
+                    Json::Value record = GetChallengeLeaderboard(1, 0);
+                    // Store total amount of players
+                    totalPlayers = record["cardinal"];
+                    // Store first record
+                    array<Json::Value> recordList(totalPlayers);
+                    records = recordList;
+                    records[record["results"][0]["rank"]-1] = record["results"][0];
+
+                    // Middle record
+                    uint middleIndex = (totalPlayers - 1) / 2;
+                    record = GetChallengeLeaderboard(1, middleIndex);
+                    records[record["results"][0]["rank"]-1] = record["results"][0];
+
+                    initialised = true;
                 }
 
-                print("Total requests: " + requestsSent);
+                uint currentPB = GetCurrentMapPB();
+                if (currentPB != personalBest)
+                {
+                    personalBest = currentPB;
+                    currentRank = FindApproxPBRank(0, totalPlayers-1);
+
+                    for (uint i = 0; i < records.Length; i++)
+                    {
+                        if (Json::Write(records[i]) != "null")
+                        {
+                            print(FormatRecord(records[i]));
+                        }
+                    }
+                    print("Total requests: " + requestsSent);
+                }
+                else
+                {
+                    yield();
+                }
             }
             else
             {
@@ -79,6 +85,7 @@ void Main()
         } 
         else
         {
+            initialised = false;
             yield();
         }
     }
@@ -189,7 +196,7 @@ void RenderInterface()
 void RenderMainWindow()
 {
     auto mapInfo = GetApp().RootMap.MapInfo;
-    UI::SetNextWindowSize(300, 200);
+    UI::SetNextWindowSize(170, 180);
     if (UI::Begin("COTD Qualifier Rank", showMainWindow, UI::WindowFlags::NoCollapse))
     {
         UI::BeginGroup();
@@ -215,12 +222,8 @@ void RenderMainWindow()
                 UI::TableNextColumn();
                 UI::Text("Current PB: ");
                 UI::TableNextColumn();
-                UI::Text(Time::Format(GetCurrentMapPB(), true, false, false));
+                UI::Text((personalBest == 0 ? "---" : Time::Format((personalBest), true, false, false)));
             UI::EndTable();
-            if (UI::Button("Get rank"))
-            {
-                print("Error: Not implemented");
-            }
         UI::EndGroup();
     }
     UI::End();
