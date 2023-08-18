@@ -1,10 +1,18 @@
+/*
+*   Haakon8855
+*/
+
+bool debug = true;
+
 bool showMainWindow = true;
 bool initialised = false;
+bool running = false;
 
 // current map info
 uint currentRank = 0;
 uint totalPlayers = 0;
 uint personalBest = 0;
+string competitionIdInput = "";
 uint competitionId = 0;
 uint challengeId = 0;
 array<Json::Value> records;
@@ -23,39 +31,11 @@ void Main()
     {
         if (MapIsLoaded())
         {
-            if (showMainWindow)
+            if (showMainWindow and running)
             {
                 if (!initialised)
                 {
-                    currentRank = 0;
-                    requestsSent = 0;
-                    personalBest = 0;
-
-                    // TODO: Get actual correct competitionId from the map
-                    // Also need to check if current map is an actual TOTD
-                    competitionId = 8946;
-
-                    // Get qualifierId from the cup
-                    string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
-                    auto competitionDetails = SendGetRequest(competitionEndpoint);
-                    challengeId = competitionDetails[0]["qualifierChallengeId"];
-                    print("ChallengeId: " + challengeId);
-
-                    // First record
-                    Json::Value record = GetChallengeLeaderboard(1, 0);
-                    // Store total amount of players
-                    totalPlayers = record["cardinal"];
-                    // Store first record
-                    array<Json::Value> recordList(totalPlayers);
-                    records = recordList;
-                    records[record["results"][0]["rank"]-1] = record["results"][0];
-
-                    // Middle record
-                    uint middleIndex = (totalPlayers - 1) / 2;
-                    record = GetChallengeLeaderboard(1, middleIndex);
-                    records[record["results"][0]["rank"]-1] = record["results"][0];
-
-                    initialised = true;
+                    Initialise();
                 }
 
                 uint currentPB = GetCurrentMapPB();
@@ -64,14 +44,17 @@ void Main()
                     personalBest = currentPB;
                     currentRank = FindApproxPBRank(0, totalPlayers-1);
 
-                    for (uint i = 0; i < records.Length; i++)
+                    if (debug)
                     {
-                        if (Json::Write(records[i]) != "null")
+                        for (uint i = 0; i < records.Length; i++)
                         {
-                            print(FormatRecord(records[i]));
+                            if (Json::Write(records[i]) != "null")
+                            {
+                                print(FormatRecord(records[i]));
+                            }
                         }
+                        print("Total requests: " + requestsSent);
                     }
-                    print("Total requests: " + requestsSent);
                 }
                 else
                 {
@@ -86,9 +69,44 @@ void Main()
         else
         {
             initialised = false;
+            running = false;
             yield();
         }
     }
+}
+
+void Initialise()
+{
+    currentRank = 0;
+    requestsSent = 0;
+    personalBest = 0;
+
+    // TODO: Get actual correct competitionId from the map
+    // Also need to check if current map is an actual TOTD
+    competitionId = 8946;
+    competitionId = Text::ParseInt(competitionIdInput);
+
+    // Get qualifierId from the cup
+    string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
+    auto competitionDetails = SendGetRequest(competitionEndpoint);
+    challengeId = competitionDetails[0]["qualifierChallengeId"];
+    print("ChallengeId: " + challengeId);
+
+    // First record
+    Json::Value record = GetChallengeLeaderboard(1, 0);
+    // Store total amount of players
+    totalPlayers = record["cardinal"];
+    // Store first record
+    array<Json::Value> recordList(totalPlayers);
+    records = recordList;
+    records[record["results"][0]["rank"]-1] = record["results"][0];
+
+    // Middle record
+    uint middleIndex = (totalPlayers - 1) / 2;
+    record = GetChallengeLeaderboard(1, middleIndex);
+    records[record["results"][0]["rank"]-1] = record["results"][0];
+
+    initialised = true;
 }
 
 uint FindApproxPBRank(uint left, uint right)
@@ -196,7 +214,7 @@ void RenderInterface()
 void RenderMainWindow()
 {
     auto mapInfo = GetApp().RootMap.MapInfo;
-    UI::SetNextWindowSize(170, 180);
+    UI::SetNextWindowSize(180, 210);
     if (UI::Begin("COTD Qualifier Rank", showMainWindow, UI::WindowFlags::NoCollapse))
     {
         UI::BeginGroup();
@@ -211,7 +229,7 @@ void RenderMainWindow()
             UI::BeginTable("table", 2, UI::TableFlags::SizingFixedFit);
                 UI::TableNextRow();
                 UI::TableNextColumn();
-                UI::Text("Current rank: ");
+                UI::Text("Current rank:");
                 UI::TableNextColumn();
                 UI::Text(
                     (currentRank == 0 ? "--- " : currentRank + " ") + 
@@ -220,9 +238,27 @@ void RenderMainWindow()
                     );
                 UI::TableNextRow();
                 UI::TableNextColumn();
-                UI::Text("Current PB: ");
+                UI::Text("Current PB:");
                 UI::TableNextColumn();
                 UI::Text((personalBest == 0 ? "---" : Time::Format((personalBest), true, false, false)));
+
+                UI::TableNextRow();
+                UI::Dummy(20);
+                UI::TableNextColumn();
+                UI::Dummy(20);
+                UI::TableNextRow();
+                UI::TableNextColumn();
+                UI::Text("CompID:");
+                UI::TableNextColumn();
+                competitionIdInput = UI::InputText("      ", competitionIdInput, UI::InputTextFlags::CharsDecimal);
+
+                UI::TableNextRow();
+                UI::TableNextColumn();
+                if (UI::Button("Start"))
+                {
+                    running = true;
+                }
+
             UI::EndTable();
         UI::EndGroup();
     }
