@@ -1,8 +1,8 @@
 [meta]
-name        = "COTD Qualification Rank"
+name        = "COTD Qualifier Rank"
 author      = "HaakonTM"
 category    = "Race"
-version     = "1.0.0"
+version     = "2.0.0"
 
 [script]
 dependencies = [ "NadeoServices" ]
