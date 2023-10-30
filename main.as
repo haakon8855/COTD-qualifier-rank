@@ -6,33 +6,30 @@ bool debug = true;
 
 bool showMainWindow = true;
 bool initialised = false;
-bool running = false;
-uint requestsSent = 0;
+uint maxRetries = 35;
+
+string rankServerBaseURL = "localhost:5000"; // Still in development
 
 // Info about the map currently loaded
-uint currentRank = 0;
-uint totalPlayers = 0;
+Json::Value rankInfo;
 uint personalBest = 0;
-string competitionIdInput = "";
-uint competitionId = 0;
-uint challengeId = 0;
-array<Json::Value> records;
+string mapUid = "";
 
 void Main() {
-    NadeoServices::AddAudience("NadeoClubServices");
-    while (!NadeoServices::IsAuthenticated("NadeoClubServices")) {
+    NadeoServices::AddAudience("NadeoLiveServices");
+    while (!NadeoServices::IsAuthenticated("NadeoLiveServices")) {
         yield();
     }
 
     while (true) {
         if (MapIsLoaded()) {
-            if (showMainWindow and running) {
+            if (showMainWindow) {
                 if (!initialised) {
                     if (!Initialise()) {
                         continue;
                     }
                 }
-                FindPBRank();
+                GetPBRank();
             } else {
                 yield();
             }
@@ -44,137 +41,58 @@ void Main() {
 }
 
 bool Initialise() {
-    // TODO: Get actual correct competitionId from the map
-    // Also need to check if current map is an actual TOTD
-    // competitionId = 8946;
-    competitionId = Text::ParseInt(competitionIdInput);
-    if (competitionId == 0) {
-        Reset();
-        return false;
+    // Check if current map is a TOTD
+    mapUid = GetApp().RootMap.MapInfo.MapUid; 
+    string mapInfoUrl = NadeoService::BaseURLLive() + "/api/campaign/map/" + mapUid;
+    Json::Value mapInfo = SendGetRequestNadeo(mapInfoUrl);
+    if (mapInfo !is null){
+        if (mapInfo["totdYear"] != "-1") {
+            // Map is a totd
+            initialised = true;
+            return true;
+        }
     }
-
-    // Get qualifierId from the cup
-    string competitionEndpoint = NadeoServices::BaseURLClub() + "/api/competitions/" + competitionId + "/rounds";
-    auto competitionDetails = SendGetRequest(competitionEndpoint);
-    challengeId = competitionDetails[0]["qualifierChallengeId"];
-    
-    if (debug) {
-        print("ChallengeId: " + challengeId);
-    }
-
-    // First record
-    Json::Value record = GetChallengeLeaderboard(1, 0);
-    // Store total amount of players
-    totalPlayers = record["cardinal"];
-    // Store first record
-    array<Json::Value> recordList(totalPlayers);
-    records = recordList;
-    records[record["results"][0]["rank"]-1] = record["results"][0];
-
-    // Middle record
-    uint middleIndex = (totalPlayers - 1) / 2;
-    record = GetChallengeLeaderboard(1, middleIndex);
-    records[record["results"][0]["rank"]-1] = record["results"][0];
-
-    initialised = true;
-    
-    return true;
+    initialised = false;
+    return false;
 }
 
 void Reset() {
     initialised = false;
-    running = false;
 
-    currentRank = 0;
-    requestsSent = 0;
+    mapUid = "";
     personalBest = 0;
-
-    totalPlayers = 0;
-    competitionId = 0;
-    challengeId = 0;
-
-    array<Json::Value> empty(1);
-    records = empty;
+    rankInfo = null;
 }
 
-void FindPBRank() {
+void GetPBRank() {
     uint currentPB = GetCurrentMapPB();
     if (currentPB != personalBest) {
         personalBest = currentPB;
-        currentRank = FindPBRankBinarySearch(0, totalPlayers-1);
-
-        if (debug) {
-            for (uint i = 0; i < records.Length; i++) {
-                if (Json::Write(records[i]) != "null") {
-                    print(FormatRecord(records[i]));
-                }
-            }
-            print("Total requests: " + requestsSent);
-        }
+        rankInfo = GetRankInfo(mapUid, personalBest);
     } else {
         yield();
     }
-}
-
-uint FindPBRankBinarySearch(uint left, uint right) {
-    while (left <= right) {
-        // if there are 100 or less records between L and R
-        if (left + 100 >= right) {
-            // Get the remaining records in one request and do sequential search
-            return FindPBRankSequentialSearch(left, right);
-        }
-
-        // Calclulate middle index between L and R
-        uint middle = (left + right) / 2;
-        // if middle index has not been fetched already
-        if (Json::Write(records[middle]) == "null") {
-            // Fetch record at middle index and store it for future searches
-            Json::Value middleRecord = GetChallengeLeaderboard(1, middle);
-            records[middleRecord["results"][0]["rank"]-1] = middleRecord["results"][0];
-        }
-
-        // Adjust L or R depending on which side of middle the PB is
-        if (records[middle]["score"] < personalBest) {
-            // if PB is worse than score at middle index
-            left = middle + 1;
-        } else if (records[middle]["score"] > personalBest) {
-            // else if PB is better than score at middle index
-            right = middle - 1;
-        } else {
-            // else: PB is the same as score at middle index
-            return middle + 1;
-        }
-    }
-    return 0;
-}
-
-uint FindPBRankSequentialSearch(uint left, uint right) {
-    if (left < right or left + 100 > right) {
-        Json::Value recordRange = GetChallengeLeaderboard(right - left, left)["results"];
-        for (uint i = 0; i < recordRange.Length; i++) {
-            records[recordRange[i]["rank"]-1] = recordRange[i];
-        }
-        for (uint i = 0; i < recordRange.Length; i++) {
-            if (recordRange[i]["score"] == personalBest) {
-                return recordRange[i]["rank"];
-            } else if (recordRange[i]["score"] < personalBest
-                and recordRange[i+1]["score"] >= personalBest) {
-                return recordRange[i+1]["rank"];
-            }
-        }
-        // If no match return rank of last record in list
-        return recordRange[recordRange.Length-1]["rank"];
-    }
-    return 0;
 }
 
 string FormatRecord(Json::Value record) {
     return "Rank: " + Json::Write(record["rank"]) + "\t Time: " + Json::Write(record["score"]);
 }
 
-Json::Value GetChallengeLeaderboard(uint length, uint offset) {
-    string challengeURL = NadeoServices::BaseURLClub() + "/api/challenges/" + challengeId + "/leaderboard?length=" + length + "&offset=" + offset;
-    return SendGetRequest(challengeURL);
+Json::Value GetRankInfo(string mapUid, uint personalBest) {
+    string requestURL = rankServerBaseURL + "/api/rank/" + mapUid + "/" + personalBest;
+    Net::HttpRequest response = SendGetRequest(requestURL);
+    int responseCode = response.ResponseCode(); 
+
+    // if response code is 503, the server is fetching the leaderboard and we need to wait
+    uint retryCount = 0;
+    while (responseCode == 503 and retryCount < maxRetries) {
+        sleep(2000);
+        response = SendGetRequest(requestURL);
+        responseCode = response.ResponseCode(); 
+        retryCount++;
+    }
+
+    return Json::Parse(response.String());
 }
 
 void RenderMenu() {
@@ -201,6 +119,11 @@ void RenderMainWindow() {
                 UI::TableNextRow();
                 UI::TableNextColumn();
                 UI::Text("\\$888" + StripFormatCodes(mapInfo.AuthorNickName));
+                if (rankInfo !is null) {
+                    UI::TableNextRow();
+                    UI::TableNextColumn();
+                    UI::Text("\\$888" + rankInfo["date"].asString().substr(0, 10));
+                }
             UI::EndTable();
             UI::BeginTable("table", 2, UI::TableFlags::SizingFixedFit);
                 UI::TableNextRow();
@@ -208,9 +131,9 @@ void RenderMainWindow() {
                 UI::Text("Current rank:");
                 UI::TableNextColumn();
                 UI::Text("\\$aaa" + 
-                    (currentRank == 0 ? "--- " : currentRank + " ") + 
+                    (rankInfo is null ? "--- " : rankInfo.rank + " ") + 
                     "/" + 
-                    (totalPlayers == 0 ? " --- " : " " + totalPlayers)
+                    (rankInfo is null ? " --- " : " " + rankInfo.playerCount)
                     );
 
                 UI::TableNextRow();
@@ -220,32 +143,6 @@ void RenderMainWindow() {
                 UI::Text("\\$aaa" + 
                     (personalBest == 0 ? "---" : Time::Format((personalBest), true, false, false))
                     );
-
-                UI::TableNextRow();
-                UI::TableNextColumn();
-                UI::Text("CompID:");
-                UI::TableNextColumn();
-                UI::Text("\\$aaa" + (competitionId == 0 ? "---" : competitionId + ""));
-
-                UI::TableNextRow();
-                UI::Dummy(20);
-                UI::TableNextColumn();
-                UI::Dummy(20);
-                UI::TableNextRow();
-                UI::TableNextColumn();
-                UI::Text("CompID:");
-                UI::TableNextColumn();
-                competitionIdInput = UI::InputText("      ", competitionIdInput, UI::InputTextFlags::CharsDecimal);
-
-                UI::TableNextRow();
-                UI::TableNextColumn();
-                if (UI::Button(running ? "Stop" : "Start")) {
-                    if (!running and initialised and competitionId != Text::ParseInt(competitionIdInput)) {
-                        Reset();
-                    }
-                    running = !running;
-                }
-
             UI::EndTable();
         UI::EndGroup();
     }
@@ -256,21 +153,25 @@ bool MapIsLoaded() {
     return GetApp().RootMap !is null;
 }
 
-Json::Value SendGetRequest(const string &in endpoint) {
-    while (!NadeoServices::IsAuthenticated("NadeoClubServices")) {
+Json::Value SendGetRequestNadeo(const string &in endpoint) {
+    while (!NadeoServices::IsAuthenticated("NadeoLiveServices")) {
         yield();
     }
-    auto request = NadeoServices::Get("NadeoClubServices", endpoint);
-
-    sleep(500); // Throttle request rate
-
+    auto request = NadeoServices::Get("NadeoLiveServices", endpoint);
     request.Start(); // Send request
     while (!request.Finished()) { // Wait for response
         yield();
     }
-    requestsSent++;
-
     return Json::Parse(request.String());
+}
+
+Net::HttpRequest SendGetRequest(const string &in endpoint) {
+    auto request = Net::HttpGet(endpoint);
+    request.Start(); // Send request
+    while (!request.Finished()) { // Wait for response
+        yield();
+    }
+    return request;
 }
 
 uint GetCurrentMapPB() {
